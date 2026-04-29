@@ -67,6 +67,7 @@ export default function Hero() {
             alt="Logomarca"
             width={120}
             height={40}
+            unoptimized
           />
 
           <span className="text-[10px] tracking-[0.35em] font-extralight text-white/70 mt-1.5 leading-none">
