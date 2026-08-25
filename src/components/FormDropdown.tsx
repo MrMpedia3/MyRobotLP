@@ -1,122 +1,126 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import {
+  formataTelefone,
+  validaEmail,
+  validaNome,
+  validaTelefone,
+} from "@/lib/validacao";
+
+type Campo = "nome" | "email" | "telefone";
+
+const campos: {
+  nome: Campo;
+  rotulo: string;
+  tipo: string;
+  placeholder: string;
+  autoComplete: string;
+  valida: (valor: string) => boolean;
+  erro: string;
+}[] = [
+  {
+    nome: "nome",
+    rotulo: "Nome",
+    tipo: "text",
+    placeholder: "Seu nome",
+    autoComplete: "name",
+    valida: validaNome,
+    erro: "Digite ao menos 3 letras, sem números.",
+  },
+  {
+    nome: "email",
+    rotulo: "Email",
+    tipo: "email",
+    placeholder: "seu@email.com",
+    autoComplete: "email",
+    valida: validaEmail,
+    erro: "Digite um email válido.",
+  },
+  {
+    nome: "telefone",
+    rotulo: "Telefone",
+    tipo: "tel",
+    placeholder: "(16) 91234-5678",
+    autoComplete: "tel",
+    valida: validaTelefone,
+    erro: "Digite um telefone com DDD.",
+  },
+];
+
+const VALORES_INICIAIS = { nome: "", email: "", telefone: "" };
 
 export default function FormDropdown() {
+  const idBase = useId();
   const [isOpen, setIsOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    nome: "",
-    email: "",
-    telefone: "",
-  });
+  const [formData, setFormData] = useState(VALORES_INICIAIS);
+  const [honeypot, setHoneypot] = useState("");
   const [touched, setTouched] = useState({
     nome: false,
     email: false,
     telefone: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitMessage, setSubmitMessage] = useState("");
+  const [submitMessage, setSubmitMessage] = useState<{
+    tipo: "sucesso" | "erro";
+    texto: string;
+  } | null>(null);
 
-  // Validações
-  const validateNome = (nome: string) => {
-    const temNumeros = /\d/.test(nome);
-    const temTamanho = nome.trim().length >= 3;
-    return temTamanho && !temNumeros;
-  };
-  
-  const validateEmail = (email: string) => {
-    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return regex.test(email);
-  };
-  
-  const validateTelefone = (telefone: string) => {
-    const temLetras = /[a-zA-Z]/.test(telefone);
-    const digitos = telefone.replace(/\D/g, "");
-    return digitos.length >= 10 && !temLetras;
-  };
-
-  const isFormValid =
-    validateNome(formData.nome) &&
-    validateEmail(formData.email) &&
-    validateTelefone(formData.telefone);
-
-  const formatTelefone = (telefone: string) => {
-    // Remove tudo que não é número
-    const digitos = telefone.replace(/\D/g, "");
-    
-    // Limita a 11 dígitos
-    const limitado = digitos.slice(0, 11);
-    
-    if (limitado.length === 0) return "";
-    if (limitado.length <= 2) return limitado;
-    if (limitado.length <= 6) return `(${limitado.slice(0, 2)}) ${limitado.slice(2)}`;
-    if (limitado.length <= 10) return `(${limitado.slice(0, 2)}) ${limitado.slice(2, 6)}-${limitado.slice(6)}`;
-    return `(${limitado.slice(0, 2)}) ${limitado.slice(2, 7)}-${limitado.slice(7)}`;
-  };
+  const isFormValid = campos.every((campo) => campo.valida(formData[campo.nome]));
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    
-    let novoValor = value;
-    if (name === "telefone") {
-      novoValor = formatTelefone(value);
-    }
-    
+
     setFormData((prev) => ({
       ...prev,
-      [name]: novoValor,
+      [name]: name === "telefone" ? formataTelefone(value) : value,
     }));
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const { name } = e.target;
-    setTouched((prev) => ({
-      ...prev,
-      [name]: true,
-    }));
+    setTouched((prev) => ({ ...prev, [e.target.name]: true }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isFormValid || isSubmitting) return;
+
     setIsSubmitting(true);
+    setSubmitMessage(null);
 
     try {
       const response = await fetch("/api/submit-form", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData, website: honeypot }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.error || "Erro ao enviar formulário");
+        throw new Error(data.error || "Não foi possível enviar. Tente novamente.");
       }
 
-      console.log("Resposta da API:", data);
-      
-      setSubmitMessage("✓ Obrigado! Entraremos em contato em breve.");
-      setFormData({ nome: "", email: "", telefone: "" });
+      setSubmitMessage({
+        tipo: "sucesso",
+        texto: data.message ?? "Obrigado! Entraremos em contato em breve.",
+      });
+      setFormData(VALORES_INICIAIS);
+      setTouched({ nome: false, email: false, telefone: false });
+
       setTimeout(() => {
-        setSubmitMessage("");
+        setSubmitMessage(null);
         setIsOpen(false);
       }, 3000);
     } catch (error) {
-      let errorMessage = "Erro ao enviar";
-      
-      if (error instanceof Error) {
-        if (error.message.includes("Unique constraint failed on the fields: (`email`)")) {
-          errorMessage = "Este email já foi cadastrado";
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
-      console.error("Erro:", errorMessage);
-      setSubmitMessage(`✗ ${errorMessage}`);
+      setSubmitMessage({
+        tipo: "erro",
+        texto:
+          error instanceof Error
+            ? error.message
+            : "Não foi possível enviar. Tente novamente.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -125,11 +129,14 @@ export default function FormDropdown() {
   return (
     <div className="w-full max-w-md">
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+        aria-controls={`${idBase}-painel`}
         className="
           w-full
           flex items-center justify-center gap-2
-          bg-purple-600 text-white
+          bg-purple-700 text-white
           px-4 py-3 rounded-full
           shadow-md
           transition-all duration-300
@@ -140,158 +147,120 @@ export default function FormDropdown() {
         <span>Formulário de Contato</span>
         <ChevronDown
           size={18}
+          aria-hidden
           className={`transition-transform duration-300 ${
             isOpen ? "rotate-180" : ""
           }`}
         />
       </button>
 
+      {/* grid-rows 0fr -> 1fr: anima a altura real do conteúdo, sem cortar o
+          botão de envio quando aparece mensagem de erro. */}
       <div
-        className={`
-          overflow-hidden transition-all duration-300 ease-in-out
-          ${isOpen ? "max-h-96 mt-3" : "max-h-0"}
-        `}
+        id={`${idBase}-painel`}
+        className={`grid transition-all duration-300 ease-in-out ${
+          isOpen ? "grid-rows-[1fr] mt-3" : "grid-rows-[0fr]"
+        }`}
       >
-        <div className="bg-gray-50 p-6 rounded-xl border border-gray-200 shadow-md">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label
-                htmlFor="nome"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Nome
-              </label>
+        <div className="overflow-hidden">
+          <div className="bg-gray-50 p-6 rounded-xl border border-gray-300 shadow-md">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              {/* Honeypot: invisível e fora da ordem de tabulação. Se vier
+                  preenchido, foi bot — o servidor descarta. */}
               <input
                 type="text"
-                id="nome"
-                name="nome"
-                value={formData.nome}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                required
-                className={`
-                  w-full
-                  px-4 py-2
-                  border-2
-                  rounded-lg
-                  text-gray-700
-                  placeholder-gray-400
-                  focus:outline-none
-                  transition-all duration-200
-                  ${
-                    touched.nome
-                      ? validateNome(formData.nome)
-                        ? "border-green-500 focus:ring-2 focus:ring-green-400"
-                        : "border-red-500 focus:ring-2 focus:ring-red-400"
-                      : "border-gray-300 focus:ring-2 focus:ring-accent-mint"
-                  }
-                `}
-                placeholder="Seu nome"
+                name="website"
+                value={honeypot}
+                onChange={(e) => setHoneypot(e.target.value)}
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden
+                className="absolute h-0 w-0 overflow-hidden opacity-0"
               />
-            </div>
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Email
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                required
-                className={`
-                  w-full
-                  px-4 py-2
-                  border-2
-                  rounded-lg
-                  text-gray-700
-                  placeholder-gray-400
-                  focus:outline-none
-                  transition-all duration-200
-                  ${
-                    touched.email
-                      ? validateEmail(formData.email)
-                        ? "border-green-500 focus:ring-2 focus:ring-green-400"
-                        : "border-red-500 focus:ring-2 focus:ring-red-400"
-                      : "border-gray-300 focus:ring-2 focus:ring-accent-mint"
-                  }
-                `}
-                placeholder="seu@email.com"
-              />
-            </div>
+              {campos.map((campo) => {
+                const valor = formData[campo.nome];
+                const foiTocado = touched[campo.nome];
+                const valido = campo.valida(valor);
+                const mostraErro = foiTocado && !valido;
+                const idCampo = `${idBase}-${campo.nome}`;
 
-            <div>
-              <label
-                htmlFor="telefone"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Telefone
-              </label>
-              <input
-                type="tel"
-                id="telefone"
-                name="telefone"
-                value={formData.telefone}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                required
-                className={`
-                  w-full
-                  px-4 py-2
-                  border-2
-                  rounded-lg
-                  text-gray-700
-                  placeholder-gray-400
-                  focus:outline-none
-                  transition-all duration-200
-                  ${
-                    touched.telefone
-                      ? validateTelefone(formData.telefone)
-                        ? "border-green-500 focus:ring-2 focus:ring-green-400"
-                        : "border-red-500 focus:ring-2 focus:ring-red-400"
-                      : "border-gray-300 focus:ring-2 focus:ring-accent-mint"
-                  }
-                `}
-                placeholder="(16) 9 1234-5678"
-              />
-            </div>
+                return (
+                  <div key={campo.nome}>
+                    <label
+                      htmlFor={idCampo}
+                      className="block text-sm font-medium text-gray-700 mb-2 text-left"
+                    >
+                      {campo.rotulo}
+                    </label>
+                    <input
+                      type={campo.tipo}
+                      id={idCampo}
+                      name={campo.nome}
+                      value={valor}
+                      onChange={handleChange}
+                      onBlur={handleBlur}
+                      required
+                      autoComplete={campo.autoComplete}
+                      aria-invalid={mostraErro}
+                      aria-describedby={mostraErro ? `${idCampo}-erro` : undefined}
+                      className={`
+                        w-full px-4 py-2 border-2 rounded-lg
+                        text-gray-900 placeholder-gray-500
+                        focus:outline-none transition-all duration-200
+                        ${
+                          foiTocado
+                            ? valido
+                              ? "border-green-600 focus:ring-2 focus:ring-green-500"
+                              : "border-red-600 focus:ring-2 focus:ring-red-500"
+                            : "border-gray-400 focus:ring-2 focus:ring-accent-blue"
+                        }
+                      `}
+                      placeholder={campo.placeholder}
+                    />
+                    {mostraErro && (
+                      <p
+                        id={`${idCampo}-erro`}
+                        className="mt-1 text-xs text-red-700 text-left"
+                      >
+                        {campo.erro}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
 
-            {submitMessage && (
-              <div
-                className={`text-sm text-center py-2 rounded-lg ${
-                  submitMessage.includes("✓")
-                    ? "bg-green-100 text-green-700"
-                    : "bg-red-100 text-red-700"
-                }`}
-              >
-                {submitMessage}
+              <div role="status" aria-live="polite">
+                {submitMessage && (
+                  <div
+                    className={`text-sm text-center py-2 rounded-lg ${
+                      submitMessage.tipo === "sucesso"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {submitMessage.texto}
+                  </div>
+                )}
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isSubmitting || !isFormValid}
-              className={`
-                w-full
-                px-4 py-2 rounded-lg
-                font-medium
-                transition-all duration-300
-                ${
-                  isFormValid
-                    ? "bg-green-600 text-white hover:scale-105 active:scale-95 hover:bg-green-700"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }
-              `}
-            >
-              {isSubmitting ? "Enviando..." : "Enviar"}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={isSubmitting || !isFormValid}
+                className={`
+                  w-full px-4 py-2 rounded-lg font-medium
+                  transition-all duration-300
+                  ${
+                    isFormValid && !isSubmitting
+                      ? "bg-green-700 text-white hover:scale-105 active:scale-95 hover:bg-green-800"
+                      : "bg-gray-300 text-gray-600 cursor-not-allowed"
+                  }
+                `}
+              >
+                {isSubmitting ? "Enviando..." : "Enviar"}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>

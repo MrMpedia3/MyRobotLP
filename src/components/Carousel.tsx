@@ -1,7 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 const baseItems = [
   {
@@ -43,8 +44,11 @@ const baseItems = [
 
 const CARD_WIDTH_RATIO = 0.72;
 const CARD_GAP = 16;
-// Duplica muitos itens para criar efeito infinito perfeito
-const items = Array(5).fill([...baseItems]).flat();
+const AUTOPLAY_MS = 10000;
+// Quantas cópias da lista existem lado a lado para dar o efeito infinito.
+// Usado tanto na montagem quanto no cálculo de reset — precisa ser um só valor.
+const TOTAL_SETS = 5;
+const items = Array.from({ length: TOTAL_SETS }, () => baseItems).flat();
 
 function getItemScrollPosition(container: HTMLDivElement, index: number) {
   const cardWidth = container.offsetWidth * CARD_WIDTH_RATIO;
@@ -55,17 +59,20 @@ function getItemScrollPosition(container: HTMLDivElement, index: number) {
 
 export default function Carousel() {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const autoplayIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoplayIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isProgrammaticScrollRef = useRef(false);
   const [centerIndex, setCenterIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
   const activeItem = items[selectedIndex ?? centerIndex];
   const autoPlayEnabled = selectedIndex === null && expandedIndex === null;
 
+  useFocusTrap(modalRef, expandedIndex !== null);
+
   // RESETAR TIMER DE AUTOPLAY
-  const resetAutoplayTimer = () => {
+  const resetAutoplayTimer = useCallback(() => {
     if (autoplayIntervalRef.current) {
       clearInterval(autoplayIntervalRef.current);
     }
@@ -83,8 +90,8 @@ export default function Carousel() {
         left: cardWidth + CARD_GAP,
         behavior: "smooth",
       });
-    }, 10000);
-  };
+    }, AUTOPLAY_MS);
+  }, [autoPlayEnabled]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -107,13 +114,25 @@ export default function Carousel() {
   // AUTOPLAY
   useEffect(() => {
     resetAutoplayTimer();
-    
+
     return () => {
       if (autoplayIntervalRef.current) {
         clearInterval(autoplayIntervalRef.current);
       }
     };
-  }, [autoPlayEnabled]);
+  }, [resetAutoplayTimer]);
+
+  // FECHA O MODAL COM ESC
+  useEffect(() => {
+    if (expandedIndex === null) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedIndex(null);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expandedIndex]);
 
   // SCROLL HANDLER
   const handleScroll = () => {
@@ -134,9 +153,8 @@ export default function Carousel() {
     setCenterIndex(index);
 
     // Reset imperceptível: quando chegar perto do final, volta pro começo suavemente
-    const totalSets = 5; // Quantidade de vezes que duplicamos
     const cycleLength = baseItems.length;
-    const maxScroll = getItemScrollPosition(container, cycleLength * (totalSets - 1));
+    const maxScroll = getItemScrollPosition(container, cycleLength * (TOTAL_SETS - 1));
     const minScroll = getItemScrollPosition(container, cycleLength);
 
     // Se passou muito pra frente, volta sem animação
@@ -180,10 +198,10 @@ export default function Carousel() {
   };
 
   return (
-    <section className="w-full h-full py-24 bg-(--color-third) flex flex-col items-center">
+    <div className="w-full h-full py-24 bg-third flex flex-col items-center">
 
       {/* TÍTULO */}
-      <h2 className="text-2xl font-semibold text-center px-6 bg-accent-blue rounded-full shadow-lg">
+      <h2 className="text-2xl font-semibold text-center px-6 py-2 bg-accent-blue text-text rounded-full shadow-lg">
         Nossos Cursos
       </h2>
 
@@ -193,91 +211,104 @@ export default function Carousel() {
           <div
             ref={scrollRef}
             onScroll={handleScroll}
+            role="group"
+            aria-label="Carrossel de cursos"
             className="flex gap-6 overflow-x-auto mt-12 w-full max-w-lg md:max-w-5xl mx-auto snap-x scroll-smooth"
           >
-          {items.map((item, index) => {
-            const isCenter = index === centerIndex;
-            const isSelected = selectedIndex === index;
-            const showText = !isDesktop && isSelected;
+            {items.map((item, index) => {
+              const isCenter = index === centerIndex;
+              const isSelected = selectedIndex === index;
+              const showText = !isDesktop && isSelected;
 
-            return (
-              <div
-                key={index}
-                onClick={() => {
-                  if (isDesktop) {
-                    setExpandedIndex(expandedIndex === index ? null : index);
-                  } else {
-                    setSelectedIndex(isSelected ? null : index);
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  aria-label={
+                    isDesktop
+                      ? `Ampliar imagem do curso ${item.title}`
+                      : `${isSelected ? "Ocultar" : "Ver"} descrição do curso ${item.title}`
                   }
-                }}
-                className={`
-                  relative shrink-0 snap-center cursor-pointer
-                  transition-all duration-500 ease-out
-                  ${isCenter ? "scale-100" : "scale-90 opacity-60"}
-                  h-[38vh] md:h-[45vh]
-                `}
-                style={{
-                  width: `${CARD_WIDTH_RATIO * 100}%`,
-                }}
-              >
-                <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-xl">
-                <Image
-                  src={item.image}
-                  alt=""
-                  fill
-                  className={`
-                    object-cover transition duration-500
-                    ${!isCenter ? "blur-[1px]" : ""}
-                    ${isSelected ? "scale-105 blur-sm" : ""}
-                  `}
-                />
-
-                {/* OVERLAY DEPTH */}
-                <div
-                  className={`
-                    absolute inset-0 transition duration-500
-                    ${isCenter ? "bg-black/20" : "bg-black/40"}
-                  `}
-                />
-
-                {/* TEXTO CLICK */}
-                <div
-                  className={`
-                    absolute inset-0 flex flex-col justify-center items-center text-center px-4 text-white
-                    transition-all duration-500
-                    ${
-                      showText
-                        ? "opacity-100 translate-y-0"
-                        : "opacity-0 translate-y-4"
+                  aria-expanded={!isDesktop ? isSelected : undefined}
+                  onClick={() => {
+                    if (isDesktop) {
+                      setExpandedIndex(expandedIndex === index ? null : index);
+                    } else {
+                      setSelectedIndex(isSelected ? null : index);
                     }
+                  }}
+                  className={`
+                    relative shrink-0 snap-center cursor-pointer text-left
+                    transition-all duration-500 ease-out
+                    ${isCenter ? "scale-100" : "scale-90 opacity-60"}
+                    h-[38vh] md:h-[45vh]
                   `}
+                  style={{
+                    width: `${CARD_WIDTH_RATIO * 100}%`,
+                  }}
                 >
-                  <h3 className="text-xl font-semibold">
-                    {item.title}
-                  </h3>
-                  <p className="text-sm mt-2 text-white/90">
-                    {item.desc}
-                  </p>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                  <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-xl">
+                    <Image
+                      src={item.image}
+                      alt={`Curso ${item.title} — MyRobot Araraquara`}
+                      fill
+                      sizes="(max-width: 768px) 72vw, 500px"
+                      className={`
+                        object-cover transition duration-500
+                        ${!isCenter ? "blur-[1px]" : ""}
+                        ${isSelected ? "scale-105 blur-sm" : ""}
+                      `}
+                    />
+
+                    {/* OVERLAY DEPTH */}
+                    <div
+                      aria-hidden
+                      className={`
+                        absolute inset-0 transition duration-500
+                        ${isCenter ? "bg-black/20" : "bg-black/40"}
+                      `}
+                    />
+
+                    {/* TEXTO CLICK */}
+                    <div
+                      className={`
+                        absolute inset-0 flex flex-col justify-center items-center text-center px-4 text-white
+                        transition-all duration-500
+                        ${
+                          showText
+                            ? "opacity-100 translate-y-0"
+                            : "opacity-0 translate-y-4"
+                        }
+                      `}
+                    >
+                      <span className="text-xl font-semibold">
+                        {item.title}
+                      </span>
+                      <span className="text-sm mt-2 text-white">
+                        {item.desc}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           {isDesktop && (
             <>
               <button
                 onClick={() => scrollByStep(-1)}
-                className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 items-center justify-center h-12 w-12 rounded-full bg-black/40 text-white shadow-lg hover:bg-black/60"
+                aria-label="Curso anterior"
+                className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 items-center justify-center h-12 w-12 rounded-full bg-black/50 text-white shadow-lg hover:bg-black/70"
               >
-                ‹
+                <span aria-hidden>‹</span>
               </button>
               <button
                 onClick={() => scrollByStep(1)}
-                className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 items-center justify-center h-12 w-12 rounded-full bg-black/40 text-white shadow-lg hover:bg-black/60"
+                aria-label="Próximo curso"
+                className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 items-center justify-center h-12 w-12 rounded-full bg-black/50 text-white shadow-lg hover:bg-black/70"
               >
-                ›
+                <span aria-hidden>›</span>
               </button>
             </>
           )}
@@ -285,14 +316,16 @@ export default function Carousel() {
 
         {isDesktop && (
           <div className="flex items-center justify-center gap-2 mt-6">
-            {baseItems.map((_, index) => {
+            {baseItems.map((item, index) => {
               const currentDot = ((centerIndex % baseItems.length) + baseItems.length) % baseItems.length;
               const isActiveDot = index === currentDot;
               return (
                 <button
-                  key={index}
+                  key={item.title}
                   onClick={() => scrollToIndex(baseItems.length + index)}
-                  className={`h-3 w-3 rounded-full transition ${isActiveDot ? "bg-white" : "bg-white/40"}`}
+                  aria-label={`Ir para o curso ${item.title}`}
+                  aria-current={isActiveDot}
+                  className={`h-3 w-3 rounded-full transition ${isActiveDot ? "bg-white" : "bg-white/50"}`}
                 />
               );
             })}
@@ -301,17 +334,25 @@ export default function Carousel() {
       </div>
 
       <div className="hidden md:flex w-full max-w-5xl justify-center">
-        <div className="relative -mt-16 w-full max-w-3xl rounded-3xl bg-white/10 border border-white/10 p-6 backdrop-blur-md shadow-2xl">
+        <div className="relative -mt-16 w-full max-w-3xl rounded-3xl bg-black/30 border border-white/20 p-6 backdrop-blur-md shadow-2xl">
           <h3 className="text-xl font-semibold text-white">{activeItem.title}</h3>
-          <p className="mt-3 text-sm text-white/80">{activeItem.desc}</p>
+          <p className="mt-3 text-sm text-white">{activeItem.desc}</p>
         </div>
       </div>
 
       {isDesktop && expandedIndex !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
+        <div
+          ref={modalRef}
+          tabIndex={-1}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Imagem do curso ${items[expandedIndex].title}`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+        >
           <button
             onClick={() => setExpandedIndex(null)}
-            className="absolute top-6 right-6 rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-primary shadow-lg"
+            autoFocus
+            className="absolute top-6 right-6 rounded-full bg-white px-4 py-2 text-sm font-medium text-primary shadow-lg"
           >
             Fechar
           </button>
@@ -319,8 +360,9 @@ export default function Carousel() {
           <div className="relative w-full max-w-5xl h-[75vh] rounded-3xl overflow-hidden bg-black">
             <Image
               src={items[expandedIndex].image}
-              alt={items[expandedIndex].title}
+              alt={`Curso ${items[expandedIndex].title}`}
               fill
+              sizes="100vw"
               className="object-contain"
             />
           </div>
@@ -331,6 +373,6 @@ export default function Carousel() {
       <p className="mt-12 text-sm text-center text-white px-6 max-w-md">
         Cursos para todas as idades, do básico ao avançado. Aprenda a programar, construir e inovar com nossos kits de robótica educacional. Inscreva-se hoje e transforme seu futuro!
       </p>
-    </section>
+    </div>
   );
 }
